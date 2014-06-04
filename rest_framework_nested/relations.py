@@ -151,6 +151,7 @@ class HyperlinkedIdentityField(Field):
     """
     Represents the instance, or a property on the instance, using hyperlinking.
     """
+    lookup_prefix = None
     lookup_field = 'pk'
     read_only = True
 
@@ -183,8 +184,9 @@ class HyperlinkedIdentityField(Field):
 
         self.slug_field = kwargs.pop('slug_field', self.slug_field)
         default_slug_kwarg = self.slug_url_kwarg or self.slug_field
-        self.pk_url_kwarg = kwargs.pop('pk_url_kwarg', self.pk_url_kwarg)
+        self.pk_url_kwarg = kwargs.pop('pk_url_kwarg', self.lookup_field)
         self.slug_url_kwarg = kwargs.pop('slug_url_kwarg', default_slug_kwarg)
+        self.lookup_prefix = kwargs.pop('lookup_prefix', self.lookup_prefix)
 
         super(HyperlinkedIdentityField, self).__init__(*args, **kwargs)
 
@@ -229,27 +231,29 @@ class HyperlinkedIdentityField(Field):
 
         May raise a `NoReverseMatch` if the `view_name` and `lookup_field`
         attributes are not configured to correctly match the URL conf.
-        """
-        lookup_field = getattr(obj, self.lookup_field, None)
-        kwargs = {self.lookup_field: lookup_field}
 
+        """
         # Handle unsaved object case
-        if lookup_field is None:
+        if obj.pk is None:
             return None
+
+        # Default to the parent model name
+        if self.lookup_prefix is None:
+            self.lookup_prefix = self.parent.opts.model.__name__.lower()
+
+        if self.lookup_prefix:
+            lookup_key = '%s_%s' % (self.lookup_prefix, self.lookup_field)
+
+        # `lookup_prefix` explicitly passed as an empty string
+        else:
+            lookup_key = self.lookup_field
+
+        kwargs = {lookup_key: getattr(obj, self.lookup_field)}
 
         try:
             return reverse(view_name, kwargs=kwargs, request=request, format=format)
         except NoReverseMatch:
             pass
-
-        if self.pk_url_kwarg != 'pk':
-            # Only try pk lookup if it has been explicitly set.
-            # Otherwise, the default `lookup_field = 'pk'` has us covered.
-            kwargs = {self.pk_url_kwarg: obj.pk}
-            try:
-                return reverse(view_name, kwargs=kwargs, request=request, format=format)
-            except NoReverseMatch:
-                pass
 
         slug = getattr(obj, self.slug_field, None)
         if slug:
